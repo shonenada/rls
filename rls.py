@@ -4,6 +4,7 @@
 import os
 import sys
 import json
+import argparse
 from urllib import urlencode
 from urllib2 import urlopen
 from datetime import datetime
@@ -12,7 +13,7 @@ from datetime import datetime
 CONFIG_PATH = './config.json'
 
 
-def _parse_dt(dt_str):
+def parse_dt(dt_str):
     return datetime.strptime(dt_str, '%Y-%m-%dT%H:%M:%SZ')
 
 
@@ -21,14 +22,19 @@ def get_repo_base(config):
     return 'https://api.github.com/repos/%s' % repo
 
 
-def gen_release_url(config):
+def gen_latest_release_url(config):
     base = get_repo_base(config)
-    return '%s/releases?per_page=1' % base
+    return '%s/releases/latest' % base
 
 
 def gen_recent_closed_pr_url(config):
     base = get_repo_base(config)
-    return '%s/pulls?state=closed&sort=update&direction=desc' % base
+    return '%s/pulls?state=closed&sort=update&direction=desc&per_page=50' % base
+
+
+def gen_commits_url(config, since):
+    base = get_repo_base(config)
+    return '%s/commits?per_page=50' % base
 
 
 def load_config(path):
@@ -63,17 +69,23 @@ def call_url(url, config):
     return data
 
 
+def get_latest_release(config):
+    url = gen_latest_release_url(config)
+    release = call_url(url, config)
+    return release
+
+
 def get_latest_release_time(config):
-    url = gen_release_url(config)
-    releases = call_url(url, config)
-    created_at = releases[0]['created_at']
-    return _parse_dt(created_at)
+    latest_release = get_latest_release(config)
+    created_at = latest_release['created_at']
+    return parse_dt(created_at)
 
 
-def get_closed_pull_after(dt, config):
+def get_closed_pull_after(config, dt):
     def select_pr(pr):
         return (
-            _parse_dt(pr['merged_at']) > dt and
+            pr['merged_at'] is not None and
+            parse_dt(pr['merged_at']) > dt and
             config['branch'] == pr['base']['ref']
         )
 
@@ -83,18 +95,68 @@ def get_closed_pull_after(dt, config):
     return after_pulls
 
 
+def get_commits_after(config, dt):
+    def select_commit(commit):
+        return (parse_dt(commit['commit']['committer']['date']) > dt and
+                commit['commit']['committer']['name'] != 'GitHub')
+
+    url = gen_commits_url(config, dt)
+    commits = call_url(url, config)
+    after_commits = filter(select_commit, commits)
+    return after_commits
+
+
 def report_pulls(pulls):
-    fmt = '* {idx}. #{pull[number]} #{pull[title]} by @{pull[user][login]}'
+    if not pulls:
+        return
+
+    print 'new pull request(s):'
+    fmt = '* {idx}. [{dt}]: #{pull[number]} #{pull[title]} by @{pull[user][login]}'
     for idx, each in enumerate(pulls):
-        print fmt.format(idx=idx+1, pull=each)
+        dt = parse_dt(each['created_at'])
+        print fmt.format(idx=idx+1, pull=each, dt=dt)
 
 
-def main():
-    config = load_config(CONFIG_PATH)
+def report_commits(commits):
+    if not commits:
+        return
+
+    print 'new commit(s):'
+    fmt = '* {idx}. [{dt}]: {commit[message]} by @{commit[author][name]}'
+    for idx, each in enumerate(commits):
+        commit = each['commit']
+        dt = parse_dt(commit['author']['date'])
+        print fmt.format(idx=idx+1, commit=commit, dt=dt)
+
+
+def do_report_commits(config):
     latest_time = get_latest_release_time(config)
-    pulls = get_closed_pull_after(latest_time, config)
+    commits = get_commits_after(config, latest_time)
+    report_commits(commits)
+
+
+def do_report_pulls(config):
+    latest_time = get_latest_release_time(config)
+    pulls = get_closed_pull_after(config, latest_time)
     report_pulls(pulls)
 
 
+def cli():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-c', '--config', default=CONFIG_PATH)
+    parser.add_argument('-i', '--commit', action='store_true', default=True)
+    parser.add_argument('-p', '--pull', action='store_true', default=False)
+
+    args = parser.parse_args()
+    config = load_config(args.config)
+
+    if args.commit:
+        do_report_commits(config)
+        print ''
+
+    if args.pull:
+        do_report_pulls(config)
+
+
 if __name__ == '__main__':
-    main()
+    cli()
