@@ -111,7 +111,7 @@ def report_pulls(pulls):
         return
 
     print 'new pull request(s):'
-    fmt = '* {idx}. [{dt}]: #{pull[number]} #{pull[title]} by @{pull[user][login]}'
+    fmt = '* {idx}. [{dt}]: #{pull[number]} {pull[title]} by @{pull[user][login]}'
     for idx, each in enumerate(pulls):
         dt = parse_dt(each['created_at'])
         print fmt.format(idx=idx+1, pull=each, dt=dt)
@@ -144,7 +144,7 @@ def do_report_pulls(config):
 def cli():
     parser = argparse.ArgumentParser()
     parser.add_argument('-c', '--config', default=CONFIG_PATH)
-    parser.add_argument('-i', '--commit', action='store_true', default=True)
+    parser.add_argument('-i', '--commit', action='store_true', default=False)
     parser.add_argument('-p', '--pull', action='store_true', default=False)
 
     args = parser.parse_args()
